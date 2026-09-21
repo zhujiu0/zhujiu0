@@ -1,0 +1,98 @@
+import time
+import threading
+
+from selenium.webdriver.common.by import By
+
+from base.login_one import GameTestLogin
+from data.database import data_list, XPATH
+
+URL_MAP = {
+    "test": "https://game_test.test928.xyz/#/start",
+    "test4": "https://test4.bpapiglobal.com/",
+    "demo": "https://game100.org/#/home",
+}
+
+
+def run_single(env: str, win_config):
+    """启动单个游戏窗口（独立线程中运行）"""
+    bot = GameTestLogin()
+    try:
+        url = URL_MAP.get(env, URL_MAP["test"])
+        bot.driver.get(url)
+
+        country_cfg = next(
+            (c for c in data_list if c["Country"] == win_config.country), None
+        )
+        if not country_cfg:
+            print(f"[Batch] 异常：找不到国家 {win_config.country} 的配置")
+            return
+
+        # 环境特定登录
+        if env == "test4":
+            bot.wallet_test4()
+            bot.input_apihost_test4(country_cfg["apihost"])
+        else:
+            bot.wallet()
+            bot.input_apihost()
+
+        # 通用输入
+        bot.input_id()
+        bot.input_key()
+        username = win_config.username or bot.random_username()
+        bot.input_username(username)
+        bot.input_rich(country_cfg["rich_code"])
+        bot.input_region(country_cfg["region"])
+        bot.input_language(win_config.language or country_cfg["language"])
+        bot._win_rate = win_config.win_rate
+        bot.input_win_probability()
+        bot.input_balance()
+        bot.click_login()
+
+        # 选择平台&游戏
+        platform_xpath = bot.get_platform_xpath(win_config.x)
+        game_xpath = bot.get_game_xpath(win_config.y)
+        bot.wait_click(platform_xpath).click()
+        time.sleep(0.5)
+        bot.wait_click(game_xpath).click()
+        print(f"[Batch] 成功：国家:{win_config.country}, 平台:{win_config.x}, 游戏={win_config.y}")
+        #ocr识别
+        # time.sleep(60)
+        # bot.img_ocr()
+
+
+
+
+
+        # 一个国家标签方便多开时候查看当前国家信息
+        label = f"{win_config.country}"
+        bot.driver.execute_script(f"""
+                   var div = document.createElement('div');
+                   div.id = 'auto-test-label';
+                   div.innerHTML = '{label}';
+                   div.style.cssText = 'position:fixed;top:0;left:0;z-index:99999;background:red;color:white;padding:5px 10px;font-size:14px;font-weight:bold;';
+                   document.body.appendChild(div);
+               """)
+        # 保持进程运行
+        # time.sleep(3600)
+
+    except Exception as e:
+        print(f"[Batch] 异常：{e}")
+    # 不 quit()，让浏览器保持
+
+
+def batch_run(env: str, tasks: list):
+    """
+    并行批量启动：每个任务一个独立线程 + 独立浏览器
+    """
+    for idx, win_config in enumerate(tasks, 1):
+        # print(f"[Batch] 提交第 {idx}/{len(tasks)} 个并行任务")
+
+        t = threading.Thread(
+            target=run_single,
+            args=(env, win_config),
+            daemon=False
+        )
+        t.start()
+        time.sleep(1)  # 错开 1 秒，避免 Chrome 同时创建冲突
+
+    # print(f"[Batch] 全部 {len(tasks)} 个任务已并行启动")
